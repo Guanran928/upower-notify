@@ -78,14 +78,14 @@ async fn main() -> Result<()> {
             }
             WarningLevel::Critical => {
                 Notification::new()
-                    .summary("Battery cricially low")
+                    .summary("Battery critically low")
                     .body("Shutting down soon unless plugged in.")
                     .timeout(0)
                     .show()?;
             }
             WarningLevel::Action => {
                 Notification::new()
-                    .summary("Battery cricially low")
+                    .summary("Battery critically low")
                     .body("The battery is below the critical level and this computer is about to shutdown.")
                     .timeout(0)
                     .show()?;
