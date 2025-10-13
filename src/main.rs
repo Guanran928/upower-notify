@@ -4,7 +4,7 @@ use {
     env_logger::Env,
     futures::stream::StreamExt,
     log::info,
-    notify_rust::{Notification, Timeout},
+    notify_rust::{Notification, Timeout, Urgency},
     std::time::Duration,
     zbus::{Connection, proxy, zvariant::OwnedValue},
 };
@@ -73,21 +73,24 @@ async fn main() -> Result<()> {
                         format_duration(time_to_empty),
                         percentage
                     ))
-                    .timeout(Timeout::Never)
+                    .timeout(Timeout::Milliseconds(30 * 1000))
+                    .urgency(Urgency::Normal)
                     .show()?;
             }
             WarningLevel::Critical => {
                 Notification::new()
                     .summary("Battery critically low")
                     .body("Shutting down soon unless plugged in.")
-                    .timeout(0)
+                    .timeout(Timeout::Never)
+                    .urgency(Urgency::Critical)
                     .show()?;
             }
             WarningLevel::Action => {
                 Notification::new()
                     .summary("Battery critically low")
                     .body("The battery is below the critical level and this computer is about to shutdown.")
-                    .timeout(0)
+                    .timeout(Timeout::Never)
+                    .urgency(Urgency::Critical)
                     .show()?;
             }
             _ => {}
