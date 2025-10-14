@@ -4,7 +4,7 @@ use {
     env_logger::Env,
     futures::stream::StreamExt,
     log::info,
-    notify_rust::{Notification, Timeout, Urgency},
+    notify_rust::{Notification, NotificationHandle, Timeout, Urgency},
     std::time::Duration,
     zbus::{Connection, proxy, zvariant::OwnedValue},
 };
@@ -56,45 +56,58 @@ async fn main() -> Result<()> {
     let connection = Connection::system().await?;
     let upower = DeviceProxy::new(&connection, args.device).await?;
     let mut stream = upower.receive_warning_level_changed().await;
+    let mut active_notification: Option<NotificationHandle> = None;
 
     while let Some(event) = stream.next().await {
         let event = event.get().await?;
         info!("WarningLevel changed: {event:?}");
 
-        match event {
+        if let Some(handle) = active_notification.take() {
+            handle.close();
+        }
+
+        active_notification = match event {
             WarningLevel::Low => {
                 let time_to_empty = Duration::new(upower.time_to_empty().await? as u64, 0);
                 let percentage = upower.percentage().await?;
 
-                Notification::new()
-                    .summary("Battery low")
-                    .body(&format!(
-                        "Approximately <b>{}</b> remaining ({}%)",
-                        format_duration(time_to_empty),
-                        percentage
-                    ))
-                    .timeout(Timeout::Milliseconds(30 * 1000))
-                    .urgency(Urgency::Normal)
-                    .show()?;
+                Some(
+                    Notification::new()
+                        .summary("Battery low")
+                        .body(&format!(
+                            "Approximately <b>{}</b> remaining ({}%)",
+                            format_duration(time_to_empty),
+                            percentage
+                        ))
+                        .icon("battery-low-symbolic")
+                        .timeout(Timeout::Milliseconds(30 * 1000))
+                        .urgency(Urgency::Normal)
+                        .show_async()
+                        .await?,
+                )
             }
-            WarningLevel::Critical => {
+            WarningLevel::Critical => Some(
                 Notification::new()
                     .summary("Battery critically low")
                     .body("Shutting down soon unless plugged in.")
+                    .icon("battery-caution-symbolic")
                     .timeout(Timeout::Never)
                     .urgency(Urgency::Critical)
-                    .show()?;
-            }
-            WarningLevel::Action => {
+                    .show_async()
+                    .await?,
+            ),
+            WarningLevel::Action => Some(
                 Notification::new()
                     .summary("Battery critically low")
                     .body("The battery is below the critical level and this computer is about to shutdown.")
+                    .icon("battery-action-symbolic")
                     .timeout(Timeout::Never)
                     .urgency(Urgency::Critical)
-                    .show()?;
-            }
-            _ => {}
-        }
+                    .show_async()
+                    .await?,
+            ),
+            _ => None,
+        };
     }
 
     Ok(())
