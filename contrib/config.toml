@@ -1,0 +1,49 @@
+# Default config for upower-notify
+# Copy this to ~/.config/upower-notify/config.toml and edit it to your likings
+
+# The UPower device path.
+# device = "/org/freedesktop/UPower/devices/battery_BAT0"
+
+[on_battery_none.exec]
+commands = [] # A list of commands passed to `sh -c`
+
+[on_battery_none.notification]
+enable = false
+summary = "Battery Discharging"
+body = "Power levels normal."
+icon = "battery-good-symbolic"
+timeout = 5000                  # in milliseconds
+urgency = "low"                 # "low" | "normal" | "critical"
+
+[on_battery_low.exec]
+commands = []
+
+[on_battery_low.notification]
+enable = true
+summary = "Battery low"
+body = "Approximately <b>{time}</b> remaining ({percentage}%)" # {time} and {percentage} will be replaced
+icon = "battery-low-symbolic"
+timeout = 30000
+urgency = "normal"
+
+[on_battery_critical.exec]
+commands = []
+
+[on_battery_critical.notification]
+enable = true
+summary = "Battery critically low"
+body = "Shutting down soon unless plugged in."
+icon = "battery-caution-symbolic"
+timeout = 0
+urgency = "critical"
+
+[on_battery_action.exec]
+commands = []
+
+[on_battery_action.notification]
+enable = true
+summary = "Battery critically low"
+body = "The battery is below the critical level and this computer is about to shutdown."
+icon = "battery-action-symbolic"
+timeout = 0
+urgency = "critical"

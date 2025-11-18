@@ -1,11 +1,18 @@
+pub mod config;
+
 use {
-    anyhow::Result,
+    crate::config::Config,
+    anyhow::{Context, Result},
     clap::Parser,
     env_logger::Env,
+    figment::{
+        Figment,
+        providers::{Format, Serialized, Toml},
+    },
     futures::stream::StreamExt,
-    log::info,
-    notify_rust::{Notification, NotificationHandle, Timeout, Urgency},
-    std::time::Duration,
+    log::{debug, error, info},
+    notify_rust::{Notification, NotificationHandle, Timeout},
+    std::{path::PathBuf, process::Command, time::Duration},
     zbus::{Connection, proxy, zvariant::OwnedValue},
 };
 
@@ -13,13 +20,9 @@ use {
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    /// D-Bus address of the battery device
-    #[arg(
-        short,
-        long,
-        default_value = "/org/freedesktop/UPower/devices/battery_BAT0"
-    )]
-    device: String,
+    /// Path to the configuration file
+    #[arg(short, long)]
+    config: Option<String>,
 }
 
 #[derive(Debug, OwnedValue)]
@@ -51,12 +54,32 @@ pub trait Device {
 async fn main() -> Result<()> {
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
     let args = Args::parse();
-    info!("Using device {}", args.device);
+    let config_path = if let Some(cfg) = args.config {
+        PathBuf::from(cfg)
+    } else {
+        let xdg_dirs = xdg::BaseDirectories::with_prefix("upower-notify");
+        xdg_dirs
+            .get_config_file("config.toml")
+            .context("failed to load XDG base directories")?
+    };
+
+    debug!("Looking for config at: {:?}", config_path);
+    let config: Config = Figment::from(Serialized::defaults(Config::default()))
+        .merge(Toml::file(config_path))
+        .extract()?;
+
+    debug!("Config loaded: {config:#?}");
+    info!("Using device {}", config.device);
 
     let connection = Connection::system().await?;
-    let upower = DeviceProxy::new(&connection, args.device).await?;
+    let upower = DeviceProxy::new(&connection, config.device).await?;
     let mut stream = upower.receive_warning_level_changed().await;
     let mut active_notification: Option<NotificationHandle> = None;
+
+    let parse_timeout = |t: u32| match t {
+        0 => Timeout::Never,
+        ms => Timeout::Milliseconds(ms),
+    };
 
     while let Some(event) = stream.next().await {
         let event = event.get().await?;
@@ -66,51 +89,49 @@ async fn main() -> Result<()> {
             handle.close();
         }
 
-        active_notification = match event {
-            WarningLevel::Low => {
-                let time_to_empty = Duration::new(upower.time_to_empty().await? as u64, 0);
-                let percentage = upower.percentage().await?;
+        let selected_config = match event {
+            WarningLevel::None => &config.on_battery_none,
+            WarningLevel::Low => &config.on_battery_low,
+            WarningLevel::Critical => &config.on_battery_critical,
+            WarningLevel::Action => &config.on_battery_action,
+            _ => continue,
+        };
 
-                Some(
-                    Notification::new()
-                        .summary("Battery low")
-                        .body(&format!(
-                            "Approximately <b>{}</b> remaining ({}%)",
-                            format_duration(time_to_empty),
-                            percentage
-                        ))
-                        .icon("battery-low-symbolic")
-                        .timeout(Timeout::Milliseconds(30 * 1000))
-                        .urgency(Urgency::Normal)
-                        .show_async()
-                        .await?,
-                )
+        let e_cfg = &selected_config.exec;
+        for cmd in &e_cfg.commands {
+            info!("Executing: {cmd}");
+            match Command::new("sh").arg("-c").arg(cmd).spawn() {
+                Ok(_) => {}
+                Err(e) => error!("Failed to spawn command '{cmd}': {e}"),
             }
-            WarningLevel::Critical => Some(
+        }
+
+        let n_cfg = &selected_config.notification;
+        if n_cfg.enable {
+            active_notification = Some(
                 Notification::new()
-                    .summary("Battery critically low")
-                    .body("Shutting down soon unless plugged in.")
-                    .icon("battery-caution-symbolic")
-                    .timeout(Timeout::Never)
-                    .urgency(Urgency::Critical)
+                    .summary(&n_cfg.summary)
+                    .body(&generate_body(&upower, &n_cfg.body).await?)
+                    .icon(&n_cfg.icon)
+                    .timeout(parse_timeout(n_cfg.timeout))
+                    .urgency((&n_cfg.urgency).into())
                     .show_async()
                     .await?,
-            ),
-            WarningLevel::Action => Some(
-                Notification::new()
-                    .summary("Battery critically low")
-                    .body("The battery is below the critical level and this computer is about to shutdown.")
-                    .icon("battery-action-symbolic")
-                    .timeout(Timeout::Never)
-                    .urgency(Urgency::Critical)
-                    .show_async()
-                    .await?,
-            ),
-            _ => None,
+            );
         };
     }
 
     Ok(())
+}
+
+async fn generate_body(device: &DeviceProxy<'_>, template: &str) -> Result<String> {
+    let time_val = device.time_to_empty().await?;
+    let percentage = device.percentage().await?;
+
+    let time = Duration::from_secs(time_val as u64);
+    Ok(template
+        .replace("{time}", &format_duration(time))
+        .replace("{percentage}", &percentage.to_string()))
 }
 
 fn format_duration(duration: Duration) -> String {
