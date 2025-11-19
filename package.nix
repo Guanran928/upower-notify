@@ -9,7 +9,7 @@ rustPlatform.buildRustPackage (finalAttrs: {
 
   src = lib.cleanSource ./.;
 
-  cargoHash = "sha256-Ls9fWVDNKgKTdG+Hozb8X6krlIrvGKdSKRHp+aDZUqU=";
+  cargoHash = "sha256-b2xZfo3h/jp3YXWs8RZFrZrGImenX8Td9Gk/guNsZpo=";
 
   meta = {
     homepage = "https://github.com/Guanran928/upower-notify";

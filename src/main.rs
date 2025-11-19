@@ -36,6 +36,18 @@ pub enum WarningLevel {
     Action = 5,
 }
 
+#[derive(Debug, OwnedValue)]
+#[repr(u32)]
+pub enum State {
+    Unknown = 0,
+    Charging = 1,
+    Discharging = 2,
+    Empty = 3,
+    FullyCharged = 4,
+    PendingCharge = 5,
+    PendingDischarge = 6,
+}
+
 #[proxy(
     interface = "org.freedesktop.UPower.Device",
     default_service = "org.freedesktop.UPower",
@@ -48,6 +60,8 @@ pub trait Device {
     fn time_to_empty(&self) -> zbus::Result<i64>;
     #[zbus(property)]
     fn warning_level(&self) -> zbus::Result<WarningLevel>;
+    #[zbus(property)]
+    fn state(&self) -> zbus::Result<State>;
 }
 
 #[tokio::main]
@@ -73,32 +87,60 @@ async fn main() -> Result<()> {
 
     let connection = Connection::system().await?;
     let upower = DeviceProxy::new(&connection, config.device).await?;
-    let mut stream = upower.receive_warning_level_changed().await;
-    let mut active_notification: Option<NotificationHandle> = None;
+    let mut warning_stream = upower.receive_warning_level_changed().await;
+    let mut state_stream = upower.receive_state_changed().await;
+    let mut warning_notification: Option<NotificationHandle> = None;
+    let mut state_notification: Option<NotificationHandle> = None;
 
     let parse_timeout = |t: u32| match t {
         0 => Timeout::Never,
         ms => Timeout::Milliseconds(ms),
     };
 
-    while let Some(event) = stream.next().await {
-        let event = event.get().await?;
-        info!("WarningLevel changed: {event:?}");
+    #[derive(Debug)]
+    enum EventSource {
+        Warning,
+        State,
+    }
 
-        if let Some(handle) = active_notification.take() {
-            handle.close();
-        }
+    loop {
+        let (source, selected_config) = tokio::select! {
+            Some(msg) = warning_stream.next() => {
+                let event = msg.get().await?;
+                info!("Received event: WarningLevel::{:?}", event);
+                let cfg = match event {
+                    WarningLevel::Unknown => &config.warning_level.unknown,
+                    WarningLevel::None => &config.warning_level.none,
+                    WarningLevel::Discharging => &config.warning_level.discharging,
+                    WarningLevel::Low => &config.warning_level.low,
+                    WarningLevel::Critical => &config.warning_level.critical,
+                    WarningLevel::Action => &config.warning_level.action,
+                };
+                (EventSource::Warning, cfg)
+            }
 
-        let selected_config = match event {
-            WarningLevel::None => &config.on_battery_none,
-            WarningLevel::Low => &config.on_battery_low,
-            WarningLevel::Critical => &config.on_battery_critical,
-            WarningLevel::Action => &config.on_battery_action,
-            _ => continue,
+            Some(msg) = state_stream.next() => {
+                let event = msg.get().await?;
+                info!("Received event: State::{:?}", event);
+                let cfg = match event {
+                    State::Unknown => &config.state.unknown,
+                    State::Charging => &config.state.charging,
+                    State::Discharging =>&config.state.discharging,
+                    State::Empty => &config.state.empty,
+                    State::FullyCharged => &config.state.fully_charged,
+                    State::PendingCharge => &config.state.pending_charge,
+                    State::PendingDischarge => &config.state.pending_discharge,
+                };
+                (EventSource::State, cfg)
+            }
+
+            _ = tokio::signal::ctrl_c() => {
+                info!("Exiting...");
+                break;
+            }
         };
 
-        let e_cfg = &selected_config.exec;
-        for cmd in &e_cfg.commands {
+        for cmd in &selected_config.exec.commands {
             info!("Executing: {cmd}");
             match Command::new("sh").arg("-c").arg(cmd).spawn() {
                 Ok(_) => {}
@@ -108,7 +150,18 @@ async fn main() -> Result<()> {
 
         let n_cfg = &selected_config.notification;
         if n_cfg.enable {
-            active_notification = Some(
+            let active_handle = match source {
+                EventSource::Warning => &mut warning_notification,
+                EventSource::State => &mut state_notification,
+            };
+
+            if let Some(handle) = active_handle.take() {
+                handle.close();
+            }
+
+            info!("Sending notification: {:#?}", n_cfg);
+
+            *active_handle = Some(
                 Notification::new()
                     .summary(&n_cfg.summary)
                     .body(&generate_body(&upower, &n_cfg.body).await?)
@@ -118,7 +171,7 @@ async fn main() -> Result<()> {
                     .show_async()
                     .await?,
             );
-        };
+        }
     }
 
     Ok(())

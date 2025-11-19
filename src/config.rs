@@ -3,14 +3,33 @@ use serde::{Deserialize, Serialize};
 #[derive(Deserialize, Serialize, Debug)]
 pub struct Config {
     pub device: String,
-    pub on_battery_none: LevelConfig,
-    pub on_battery_low: LevelConfig,
-    pub on_battery_critical: LevelConfig,
-    pub on_battery_action: LevelConfig,
+    pub warning_level: WarningLevelConfig,
+    pub state: StateConfig,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
-pub struct LevelConfig {
+pub struct WarningLevelConfig {
+    pub unknown: EventConfig,
+    pub none: EventConfig,
+    pub discharging: EventConfig,
+    pub low: EventConfig,
+    pub critical: EventConfig,
+    pub action: EventConfig,
+}
+
+#[derive(Deserialize, Serialize, Debug, Default)]
+pub struct StateConfig {
+    pub unknown: EventConfig,
+    pub charging: EventConfig,
+    pub discharging: EventConfig,
+    pub empty: EventConfig,
+    pub fully_charged: EventConfig,
+    pub pending_charge: EventConfig,
+    pub pending_discharge: EventConfig,
+}
+
+#[derive(Deserialize, Serialize, Debug, Default)]
+pub struct EventConfig {
     pub notification: NotificationConfig,
     pub exec: ExecConfig,
 }
@@ -30,12 +49,26 @@ pub struct ExecConfig {
     pub commands: Vec<String>,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum UrgencyConfig {
     Low,
+    #[default]
     Normal,
     Critical,
+}
+
+impl Default for NotificationConfig {
+    fn default() -> Self {
+        Self {
+            enable: false,
+            summary: "Notification Summary".to_string(),
+            body: "Notification Body".to_string(),
+            icon: "".to_string(),
+            timeout: 30000,
+            urgency: UrgencyConfig::Normal,
+        }
+    }
 }
 
 impl From<&UrgencyConfig> for notify_rust::Urgency {
@@ -52,50 +85,45 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             device: "/org/freedesktop/UPower/devices/battery_BAT0".to_string(),
-            on_battery_none: LevelConfig {
-                exec: ExecConfig::default(),
-                notification: NotificationConfig {
-                    enable: false,
-                    summary: "Battery Discharging".into(),
-                    body: "Power levels normal. <b>{time}</b> remaining ({percentage}%)".into(),
-                    icon: "battery-good-symbolic".into(),
-                    timeout: 5000,
-                    urgency: UrgencyConfig::Low,
+            warning_level: WarningLevelConfig {
+                none: EventConfig::default(),
+                unknown: EventConfig::default(),
+                discharging: EventConfig::default(),
+                low: EventConfig {
+                    exec: ExecConfig::default(),
+                    notification: NotificationConfig {
+                        enable: true,
+                        summary: "Battery low".into(),
+                        body: "Approximately <b>{time}</b> remaining ({percentage}%)".into(),
+                        icon: "battery-low-symbolic".into(),
+                        timeout: 30000,
+                        urgency: UrgencyConfig::Normal,
+                    },
+                },
+                critical: EventConfig {
+                    exec: ExecConfig::default(),
+                    notification: NotificationConfig {
+                        enable: true,
+                        summary: "Battery critically low".into(),
+                        body: "Shutting down soon unless plugged in.".into(),
+                        icon: "battery-caution-symbolic".into(),
+                        timeout: 0,
+                        urgency: UrgencyConfig::Critical,
+                    },
+                },
+                action: EventConfig {
+                    exec: ExecConfig::default(),
+                    notification: NotificationConfig {
+                        enable: true,
+                        summary: "Battery critically low".into(),
+                        body: "The battery is below the critical level and this computer is about to shutdown.".into(),
+                        icon: "battery-action-symbolic".into(),
+                        timeout: 0,
+                        urgency: UrgencyConfig::Critical,
+                    },
                 },
             },
-            on_battery_low: LevelConfig {
-                exec: ExecConfig::default(),
-                notification: NotificationConfig {
-                    enable: true,
-                    summary: "Battery low".into(),
-                    body: "Approximately <b>{time}</b> remaining ({percentage}%)".into(),
-                    icon: "battery-low-symbolic".into(),
-                    timeout: 30000,
-                    urgency: UrgencyConfig::Normal,
-                },
-            },
-            on_battery_critical: LevelConfig {
-                exec: ExecConfig::default(),
-                notification: NotificationConfig {
-                    enable: true,
-                    summary: "Battery critically low".into(),
-                    body: "Shutting down soon unless plugged in.".into(),
-                    icon: "battery-caution-symbolic".into(),
-                    timeout: 0,
-                    urgency: UrgencyConfig::Critical,
-                },
-            },
-            on_battery_action: LevelConfig {
-                exec: ExecConfig::default(),
-                notification: NotificationConfig {
-                    enable: true,
-                    summary: "Battery critically low".into(),
-                    body: "The battery is below the critical level and this computer is about to shutdown.".into(),
-                    icon: "battery-action-symbolic".into(),
-                    timeout: 0,
-                    urgency: UrgencyConfig::Critical,
-                },
-            },
+            state: StateConfig::default()
         }
     }
 }
