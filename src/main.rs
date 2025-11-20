@@ -97,14 +97,8 @@ async fn main() -> Result<()> {
         ms => Timeout::Milliseconds(ms),
     };
 
-    #[derive(Debug)]
-    enum EventSource {
-        Warning,
-        State,
-    }
-
     loop {
-        let (source, selected_config) = tokio::select! {
+        let (active_handle, selected_config) = tokio::select! {
             Some(msg) = warning_stream.next() => {
                 let event = msg.get().await?;
                 info!("Received event: WarningLevel::{:?}", event);
@@ -116,7 +110,7 @@ async fn main() -> Result<()> {
                     WarningLevel::Critical => &config.warning_level.critical,
                     WarningLevel::Action => &config.warning_level.action,
                 };
-                (EventSource::Warning, cfg)
+                (&mut warning_notification, cfg)
             }
 
             Some(msg) = state_stream.next() => {
@@ -131,7 +125,7 @@ async fn main() -> Result<()> {
                     State::PendingCharge => &config.state.pending_charge,
                     State::PendingDischarge => &config.state.pending_discharge,
                 };
-                (EventSource::State, cfg)
+                (&mut state_notification, cfg)
             }
 
             _ = tokio::signal::ctrl_c() => {
@@ -145,20 +139,15 @@ async fn main() -> Result<()> {
             match Command::new("sh").arg("-c").arg(cmd).spawn() {
                 Ok(_) => {}
                 Err(e) => error!("Failed to spawn command '{cmd}': {e}"),
-            }
+            };
         }
+
+        if let Some(handle) = active_handle.take() {
+            handle.close();
+        };
 
         let n_cfg = &selected_config.notification;
         if n_cfg.enable {
-            let active_handle = match source {
-                EventSource::Warning => &mut warning_notification,
-                EventSource::State => &mut state_notification,
-            };
-
-            if let Some(handle) = active_handle.take() {
-                handle.close();
-            }
-
             info!("Sending notification: {:#?}", n_cfg);
 
             *active_handle = Some(
@@ -171,7 +160,7 @@ async fn main() -> Result<()> {
                     .show_async()
                     .await?,
             );
-        }
+        };
     }
 
     Ok(())
