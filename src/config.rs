@@ -62,9 +62,9 @@ impl Default for NotificationConfig {
     fn default() -> Self {
         Self {
             enable: false,
-            summary: "Notification Summary".to_string(),
-            body: "Notification Body".to_string(),
-            icon: "".to_string(),
+            summary: "Notification Summary".to_owned(),
+            body: "Notification Body".to_owned(),
+            icon: String::new(),
             timeout: 30000,
             urgency: UrgencyConfig::Normal,
         }
@@ -84,7 +84,7 @@ impl From<&UrgencyConfig> for notify_rust::Urgency {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            device: "/org/freedesktop/UPower/devices/battery_BAT0".to_string(),
+            device: "/org/freedesktop/UPower/devices/battery_BAT0".to_owned(),
             warning_level: WarningLevelConfig {
                 none: EventConfig::default(),
                 unknown: EventConfig::default(),

@@ -77,7 +77,7 @@ async fn main() -> Result<()> {
             .context("failed to load XDG base directories")?
     };
 
-    debug!("Looking for config at: {:?}", config_path);
+    debug!("Looking for config at: {config_path:?}");
     let config: Config = Figment::from(Serialized::defaults(Config::default()))
         .merge(Toml::file(config_path))
         .extract()?;
@@ -101,7 +101,7 @@ async fn main() -> Result<()> {
         let (active_handle, selected_config) = tokio::select! {
             Some(msg) = warning_stream.next() => {
                 let event = msg.get().await?;
-                info!("Received event: WarningLevel::{:?}", event);
+                info!("Received event: WarningLevel::{event:?}");
                 let cfg = match event {
                     WarningLevel::Unknown => &config.warning_level.unknown,
                     WarningLevel::None => &config.warning_level.none,
@@ -115,7 +115,7 @@ async fn main() -> Result<()> {
 
             Some(msg) = state_stream.next() => {
                 let event = msg.get().await?;
-                info!("Received event: State::{:?}", event);
+                info!("Received event: State::{event:?}");
                 let cfg = match event {
                     State::Unknown => &config.state.unknown,
                     State::Charging => &config.state.charging,
@@ -139,16 +139,16 @@ async fn main() -> Result<()> {
             match Command::new("sh").arg("-c").arg(cmd).spawn() {
                 Ok(_) => {}
                 Err(e) => error!("Failed to spawn command '{cmd}': {e}"),
-            };
+            }
         }
 
         if let Some(handle) = active_handle.take() {
             handle.close();
-        };
+        }
 
         let n_cfg = &selected_config.notification;
         if n_cfg.enable {
-            info!("Sending notification: {:#?}", n_cfg);
+            info!("Sending notification: {n_cfg:#?}");
 
             *active_handle = Some(
                 Notification::new()
@@ -160,7 +160,7 @@ async fn main() -> Result<()> {
                     .show_async()
                     .await?,
             );
-        };
+        }
     }
 
     Ok(())
@@ -194,7 +194,7 @@ fn format_duration(duration: Duration) -> String {
     }
 
     if parts.is_empty() {
-        parts.push("0 minutes".to_string());
+        parts.push("0 minutes".to_owned());
     }
 
     parts.join(", ")
